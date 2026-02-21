@@ -102,7 +102,225 @@ jobs:
         key: balance-hash-${{ hashFiles('balance_hash.txt') }}
         restore-keys: |
           balance-hash-
-            
+
+    - name: 校验账号配置 JSON
+      env:
+        ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
+        ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
+        ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
+        PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
+        PROXY: ${{ secrets.PROXY }}
+      run: |
+        function Test-JsonType {
+          param(
+            [Parameter(Mandatory = $true)]
+            [string]$Name,
+            [Parameter(Mandatory = $true)]
+            [string]$ExpectedType,
+            [bool]$Required = $false
+          )
+
+          $value = [Environment]::GetEnvironmentVariable($Name)
+          if ([string]::IsNullOrWhiteSpace($value)) {
+            if ($Required) {
+              Write-Host "::error::$Name 未配置，请在 production 环境 Secret 中设置"
+              exit 1
+            }
+            Write-Host "ℹ️ $Name 未配置，跳过校验"
+            return $null
+          }
+
+          try {
+            $parsed = $value | ConvertFrom-Json -Depth 100
+          } catch {
+            Write-Host "::error::$Name 不是合法 JSON: $($_.Exception.Message)"
+            exit 1
+          }
+
+          if ($ExpectedType -eq "array" -and -not ($parsed -is [System.Array])) {
+            Write-Host "::error::$Name 必须是 JSON 数组格式 []"
+            exit 1
+          }
+          if ($ExpectedType -eq "object" -and ($parsed -is [System.Array] -or $null -eq $parsed)) {
+            Write-Host "::error::$Name 必须是 JSON 对象格式 {}"
+            exit 1
+          }
+
+          Write-Host "✅ $Name JSON 格式校验通过"
+          return $parsed
+        }
+
+        function Has-Property {
+          param(
+            [Parameter(Mandatory = $true)]$Obj,
+            [Parameter(Mandatory = $true)][string]$Name
+          )
+          return $null -ne $Obj.PSObject.Properties[$Name]
+        }
+
+        $accounts = Test-JsonType -Name "ACCOUNTS" -ExpectedType "array" -Required $true
+        if ($accounts.Count -eq 0) {
+          Write-Host "::error::ACCOUNTS 不能为空数组，至少需要一个账号"
+          exit 1
+        }
+
+        for ($i = 0; $i -lt $accounts.Count; $i++) {
+          $account = $accounts[$i]
+          if ($null -eq $account.PSObject) {
+            Write-Host "::error::ACCOUNTS[$i] 必须是 JSON 对象"
+            exit 1
+          }
+
+          $hasCookies = Has-Property -Obj $account -Name "cookies"
+          $hasLinuxDo = Has-Property -Obj $account -Name "linux.do"
+          $hasGithub = Has-Property -Obj $account -Name "github"
+
+          if (-not ($hasCookies -or $hasLinuxDo -or $hasGithub)) {
+            Write-Host "::error::ACCOUNTS[$i] 必须包含 cookies / linux.do / github 其中之一"
+            exit 1
+          }
+
+          if ($hasCookies -and -not (Has-Property -Obj $account -Name "api_user")) {
+            Write-Host "::error::ACCOUNTS[$i] 使用 cookies 时必须配置 api_user"
+            exit 1
+          }
+        }
+
+        $linuxDoAccounts = Test-JsonType -Name "ACCOUNTS_LINUX_DO" -ExpectedType "array"
+        if ($linuxDoAccounts) {
+          for ($i = 0; $i -lt $linuxDoAccounts.Count; $i++) {
+            $item = $linuxDoAccounts[$i]
+            if (-not (Has-Property -Obj $item -Name "username") -or -not (Has-Property -Obj $item -Name "password")) {
+              Write-Host "::error::ACCOUNTS_LINUX_DO[$i] 必须包含 username 和 password"
+              exit 1
+            }
+          }
+        }
+
+        $githubAccounts = Test-JsonType -Name "ACCOUNTS_GITHUB" -ExpectedType "array"
+        if ($githubAccounts) {
+          for ($i = 0; $i -lt $githubAccounts.Count; $i++) {
+            $item = $githubAccounts[$i]
+            if (-not (Has-Property -Obj $item -Name "username") -or -not (Has-Property -Obj $item -Name "password")) {
+              Write-Host "::error::ACCOUNTS_GITHUB[$i] 必须包含 username 和 password"
+              exit 1
+            }
+          }
+        }
+
+        Test-JsonType -Name "PROVIDERS" -ExpectedType "object" | Out-Null
+
+        $proxyValue = [Environment]::GetEnvironmentVariable("PROXY")
+        if ([string]::IsNullOrWhiteSpace($proxyValue)) {
+          Write-Host "ℹ️ PROXY 未配置，跳过校验"
+        } else {
+          try {
+            $proxyObj = $proxyValue | ConvertFrom-Json -Depth 100
+            if ($proxyObj -is [System.Array] -or $null -eq $proxyObj) {
+              Write-Host "::error::PROXY 为 JSON 时必须是对象格式 {}"
+              exit 1
+            }
+            Write-Host "✅ PROXY JSON 对象格式校验通过"
+          } catch {
+            # 兼容项目原有行为：PROXY 可直接使用字符串代理地址
+            Write-Host "ℹ️ PROXY 不是 JSON，将按纯字符串代理地址使用"
+          }
+        }
+
+    - name: 账号配置预览（脱敏）
+      env:
+        ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
+        ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
+        ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
+        PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
+        PROXY: ${{ secrets.PROXY }}
+      run: |
+        function Parse-JsonOrNull {
+          param(
+            [Parameter(Mandatory = $true)]
+            [string]$Name
+          )
+
+          $value = [Environment]::GetEnvironmentVariable($Name)
+          if ([string]::IsNullOrWhiteSpace($value)) {
+            return $null
+          }
+
+          try {
+            return $value | ConvertFrom-Json -Depth 100
+          } catch {
+            Write-Host "ℹ️ $Name 无法解析为 JSON，预览时跳过"
+            return $null
+          }
+        }
+
+        function Has-Property {
+          param(
+            [Parameter(Mandatory = $true)]$Obj,
+            [Parameter(Mandatory = $true)][string]$Name
+          )
+          return $null -ne $Obj.PSObject.Properties[$Name]
+        }
+
+        $accounts = Parse-JsonOrNull -Name "ACCOUNTS"
+        if ($null -eq $accounts -or -not ($accounts -is [System.Array])) {
+          Write-Host "ℹ️ ACCOUNTS 不可预览"
+          exit 0
+        }
+
+        Write-Host "📊 脱敏预览摘要:"
+        Write-Host "  - ACCOUNTS 总数: $($accounts.Count)"
+
+        for ($i = 0; $i -lt $accounts.Count; $i++) {
+          $account = $accounts[$i]
+          $displayName = if ((Has-Property -Obj $account -Name "name") -and -not [string]::IsNullOrWhiteSpace($account.name)) { $account.name } else { "Account $($i + 1)" }
+          $provider = if ((Has-Property -Obj $account -Name "provider") -and -not [string]::IsNullOrWhiteSpace($account.provider)) { $account.provider } else { "anyrouter" }
+          $hasCookies = Has-Property -Obj $account -Name "cookies"
+          $hasApiUser = Has-Property -Obj $account -Name "api_user"
+          $hasLinuxDo = Has-Property -Obj $account -Name "linux.do"
+          $hasGithub = Has-Property -Obj $account -Name "github"
+
+          Write-Host "  - [$i] name=$displayName, provider=$provider, cookies=$hasCookies, api_user=$hasApiUser, linux.do=$hasLinuxDo, github=$hasGithub"
+        }
+
+        $linuxDoAccounts = Parse-JsonOrNull -Name "ACCOUNTS_LINUX_DO"
+        if ($linuxDoAccounts -is [System.Array]) {
+          Write-Host "  - ACCOUNTS_LINUX_DO 总数: $($linuxDoAccounts.Count)"
+        } else {
+          Write-Host "  - ACCOUNTS_LINUX_DO: 未配置"
+        }
+
+        $githubAccounts = Parse-JsonOrNull -Name "ACCOUNTS_GITHUB"
+        if ($githubAccounts -is [System.Array]) {
+          Write-Host "  - ACCOUNTS_GITHUB 总数: $($githubAccounts.Count)"
+        } else {
+          Write-Host "  - ACCOUNTS_GITHUB: 未配置"
+        }
+
+        $providers = Parse-JsonOrNull -Name "PROVIDERS"
+        if ($null -ne $providers -and -not ($providers -is [System.Array])) {
+          Write-Host "  - PROVIDERS 自定义数量: $($providers.PSObject.Properties.Count)"
+        } else {
+          Write-Host "  - PROVIDERS: 未配置"
+        }
+
+        $proxy = [Environment]::GetEnvironmentVariable("PROXY")
+        if ([string]::IsNullOrWhiteSpace($proxy)) {
+          Write-Host "  - PROXY: 未配置"
+        } else {
+          try {
+            $proxyObj = $proxy | ConvertFrom-Json -Depth 100
+            if ($proxyObj -is [System.Array] -or $null -eq $proxyObj) {
+              Write-Host "  - PROXY: 已配置（类型异常）"
+            } else {
+              $proxyServer = if ($null -ne $proxyObj.PSObject.Properties["server"] -and -not [string]::IsNullOrWhiteSpace($proxyObj.server)) { "已设置 server" } else { "无 server 字段" }
+              Write-Host "  - PROXY: 已配置（JSON 对象, $proxyServer）"
+            }
+          } catch {
+            Write-Host "  - PROXY: 已配置（字符串）"
+          }
+        }
+             
     - name: 执行签到
       env:
         ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
