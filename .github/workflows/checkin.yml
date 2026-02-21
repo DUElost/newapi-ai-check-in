@@ -18,14 +18,6 @@ jobs:
       ANYROUTER_API_USER: '131859'
       ANYROUTER_NAME: '账号1'
       ANYROUTER_PROVIDER: 'anyrouter'
-      # Linux.do 账号（可选）
-      LINUXDO_USERNAME: ''
-      LINUXDO_PASSWORD: ''
-      # GitHub 账号（可选）
-      # GITHUB_USERNAME: ''
-      # GITHUB_PASSWORD: ''
-      # 代理地址（可选）
-      PROXY: ''
     steps:
     - name: set beijing timezone
       uses: szenius/set-timezone@v2.0
@@ -143,33 +135,6 @@ jobs:
           exit 1
         }
 
-        # Linux.do 账号
-        $linuxDoAccounts = ""
-        $hasLinuxUser = -not [string]::IsNullOrWhiteSpace($env:LINUXDO_USERNAME)
-        $hasLinuxPass = -not [string]::IsNullOrWhiteSpace($env:LINUXDO_PASSWORD)
-        if ($hasLinuxUser -and $hasLinuxPass) {
-          $linuxObj = @{ username = $env:LINUXDO_USERNAME; password = $env:LINUXDO_PASSWORD }
-          $linuxJson = ConvertTo-Json -InputObject $linuxObj -Compress -Depth 10
-          $linuxDoAccounts = "[$linuxJson]"
-          Write-Host "✅ 已生成 ACCOUNTS_LINUX_DO"
-        }
-        Export-EnvVar -Name "ACCOUNTS_LINUX_DO" -Value $linuxDoAccounts
-
-        # GitHub 账号
-        $githubAccounts = ""
-        $hasGithubUser = -not [string]::IsNullOrWhiteSpace($env:GITHUB_USERNAME)
-        $hasGithubPass = -not [string]::IsNullOrWhiteSpace($env:GITHUB_PASSWORD)
-        if ($hasGithubUser -and $hasGithubPass) {
-          $githubObj = @{ username = $env:GITHUB_USERNAME; password = $env:GITHUB_PASSWORD }
-          $githubJson = ConvertTo-Json -InputObject $githubObj -Compress -Depth 10
-          $githubAccounts = "[$githubJson]"
-          Write-Host "✅ 已生成 ACCOUNTS_GITHUB"
-        }
-        Export-EnvVar -Name "ACCOUNTS_GITHUB" -Value $githubAccounts
-
-        # 代理
-        Export-EnvVar -Name "PROXY" -Value $env:PROXY
-
     - name: 校验账号配置 JSON
       run: |
         function Export-EnvVar {
@@ -268,47 +233,6 @@ jobs:
           }
         }
 
-        $linuxDoAccounts = Test-JsonType -Name "ACCOUNTS_LINUX_DO" -ExpectedType "array"
-        if ($linuxDoAccounts) {
-          for ($i = 0; $i -lt $linuxDoAccounts.Count; $i++) {
-            $item = $linuxDoAccounts[$i]
-            if (-not (Has-Property -Obj $item -Name "username") -or -not (Has-Property -Obj $item -Name "password")) {
-              Write-Host "::error::ACCOUNTS_LINUX_DO[$i] 必须包含 username 和 password"
-              exit 1
-            }
-          }
-        }
-
-        $githubAccounts = Test-JsonType -Name "ACCOUNTS_GITHUB" -ExpectedType "array"
-        if ($githubAccounts) {
-          for ($i = 0; $i -lt $githubAccounts.Count; $i++) {
-            $item = $githubAccounts[$i]
-            if (-not (Has-Property -Obj $item -Name "username") -or -not (Has-Property -Obj $item -Name "password")) {
-              Write-Host "::error::ACCOUNTS_GITHUB[$i] 必须包含 username 和 password"
-              exit 1
-            }
-          }
-        }
-
-        Test-JsonType -Name "PROVIDERS" -ExpectedType "object" | Out-Null
-
-        $proxyValue = [Environment]::GetEnvironmentVariable("PROXY")
-        if ([string]::IsNullOrWhiteSpace($proxyValue)) {
-          Write-Host "ℹ️ PROXY 未配置，跳过校验"
-        } else {
-          try {
-            $proxyObj = $proxyValue | ConvertFrom-Json -Depth 100
-            if ($proxyObj -is [System.Array] -or $null -eq $proxyObj) {
-              Write-Host "::error::PROXY 为 JSON 时必须是对象格式 {}"
-              exit 1
-            }
-            Write-Host "✅ PROXY JSON 对象格式校验通过"
-          } catch {
-            # 兼容项目原有行为：PROXY 可直接使用字符串代理地址
-            Write-Host "ℹ️ PROXY 不是 JSON，将按纯字符串代理地址使用"
-          }
-        }
-
     - name: 账号配置预览（脱敏）
       run: |
         function Parse-JsonOrNull {
@@ -353,50 +277,10 @@ jobs:
           $provider = if ((Has-Property -Obj $account -Name "provider") -and -not [string]::IsNullOrWhiteSpace($account.provider)) { $account.provider } else { "anyrouter" }
           $hasCookies = Has-Property -Obj $account -Name "cookies"
           $hasApiUser = Has-Property -Obj $account -Name "api_user"
-          $hasLinuxDo = Has-Property -Obj $account -Name "linux.do"
-          $hasGithub = Has-Property -Obj $account -Name "github"
 
-          Write-Host "  - [$i] name=$displayName, provider=$provider, cookies=$hasCookies, api_user=$hasApiUser, linux.do=$hasLinuxDo, github=$hasGithub"
+          Write-Host "  - [$i] name=$displayName, provider=$provider, cookies=$hasCookies, api_user=$hasApiUser"
         }
 
-        $linuxDoAccounts = Parse-JsonOrNull -Name "ACCOUNTS_LINUX_DO"
-        if ($linuxDoAccounts -is [System.Array]) {
-          Write-Host "  - ACCOUNTS_LINUX_DO 总数: $($linuxDoAccounts.Count)"
-        } else {
-          Write-Host "  - ACCOUNTS_LINUX_DO: 未配置"
-        }
-
-        $githubAccounts = Parse-JsonOrNull -Name "ACCOUNTS_GITHUB"
-        if ($githubAccounts -is [System.Array]) {
-          Write-Host "  - ACCOUNTS_GITHUB 总数: $($githubAccounts.Count)"
-        } else {
-          Write-Host "  - ACCOUNTS_GITHUB: 未配置"
-        }
-
-        $providers = Parse-JsonOrNull -Name "PROVIDERS"
-        if ($null -ne $providers -and -not ($providers -is [System.Array])) {
-          Write-Host "  - PROVIDERS 自定义数量: $($providers.PSObject.Properties.Count)"
-        } else {
-          Write-Host "  - PROVIDERS: 未配置"
-        }
-
-        $proxy = [Environment]::GetEnvironmentVariable("PROXY")
-        if ([string]::IsNullOrWhiteSpace($proxy)) {
-          Write-Host "  - PROXY: 未配置"
-        } else {
-          try {
-            $proxyObj = $proxy | ConvertFrom-Json -Depth 100
-            if ($proxyObj -is [System.Array] -or $null -eq $proxyObj) {
-              Write-Host "  - PROXY: 已配置（类型异常）"
-            } else {
-              $proxyServer = if ($null -ne $proxyObj.PSObject.Properties["server"] -and -not [string]::IsNullOrWhiteSpace($proxyObj.server)) { "已设置 server" } else { "无 server 字段" }
-              Write-Host "  - PROXY: 已配置（JSON 对象, $proxyServer）"
-            }
-          } catch {
-            Write-Host "  - PROXY: 已配置（字符串）"
-          }
-        }
-             
     - name: 执行签到
       env:
         DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
