@@ -151,7 +151,7 @@ jobs:
               Write-Host "ℹ️ $Name 是空数组，视为未配置"
               return ""
             }
-            return ($parsed | ConvertTo-Json -Compress -Depth 100)
+            return (ConvertTo-Json -InputObject $parsed -Compress -Depth 100 -AsArray)
           } catch {
             Write-Host "⚠️ $Name 不是合法 JSON，已忽略该值: $($_.Exception.Message)"
             return ""
@@ -166,7 +166,7 @@ jobs:
           if ($hasSession -and $hasApiUser) {
             $accountName = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_NAME_1)) { "账号1" } else { $env:ANYROUTER_NAME_1 }
             $provider = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_PROVIDER_1)) { "anyrouter" } else { $env:ANYROUTER_PROVIDER_1 }
-            $accounts = @(
+            $accounts = ConvertTo-Json -InputObject @(
               @{
                 name = $accountName
                 provider = $provider
@@ -175,7 +175,7 @@ jobs:
                 }
                 api_user = $env:ANYROUTER_API_USER_1
               }
-            ) | ConvertTo-Json -Compress -Depth 20
+            ) -Compress -Depth 20 -AsArray
             Write-Host "✅ 已通过 ANYROUTER_SESSION_1 + ANYROUTER_API_USER_1 自动生成 ACCOUNTS"
           } elseif ($hasSession -or $hasApiUser) {
             Write-Host "::error::ANYROUTER_SESSION_1 与 ANYROUTER_API_USER_1 必须同时配置"
@@ -194,12 +194,12 @@ jobs:
           $hasLinuxUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_USERNAME)
           $hasLinuxPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_PASSWORD)
           if ($hasLinuxUser -and $hasLinuxPass) {
-            $linuxDoAccounts = @(
+            $linuxDoAccounts = ConvertTo-Json -InputObject @(
               @{
                 username = $env:CHECKIN_LINUX_DO_USERNAME
                 password = $env:CHECKIN_LINUX_DO_PASSWORD
               }
-            ) | ConvertTo-Json -Compress -Depth 10
+            ) -Compress -Depth 10 -AsArray
             Write-Host "✅ 已通过 CHECKIN_LINUX_DO_USERNAME/PASSWORD 自动生成 ACCOUNTS_LINUX_DO"
           } elseif ($hasLinuxUser -or $hasLinuxPass) {
             Write-Host "::error::CHECKIN_LINUX_DO_USERNAME 与 CHECKIN_LINUX_DO_PASSWORD 必须同时配置"
@@ -213,12 +213,12 @@ jobs:
           $hasGithubUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_USERNAME)
           $hasGithubPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_PASSWORD)
           if ($hasGithubUser -and $hasGithubPass) {
-            $githubAccounts = @(
+            $githubAccounts = ConvertTo-Json -InputObject @(
               @{
                 username = $env:CHECKIN_GITHUB_USERNAME
                 password = $env:CHECKIN_GITHUB_PASSWORD
               }
-            ) | ConvertTo-Json -Compress -Depth 10
+            ) -Compress -Depth 10 -AsArray
             Write-Host "✅ 已通过 CHECKIN_GITHUB_USERNAME/PASSWORD 自动生成 ACCOUNTS_GITHUB"
           } elseif ($hasGithubUser -or $hasGithubPass) {
             Write-Host "::error::CHECKIN_GITHUB_USERNAME 与 CHECKIN_GITHUB_PASSWORD 必须同时配置"
