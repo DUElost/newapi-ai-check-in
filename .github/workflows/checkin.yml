@@ -4,20 +4,11 @@ on:
     - cron: '0 */8 * * *'
   workflow_dispatch:
     inputs:
-      accounts:
-        description: '账号配置 (JSON 格式，可选，不填则使用 secrets.ACCOUNTS)'
-        required: false
-        type: string
-        default: ''
-      providers:
-        description: '自定义 Provider 配置 (JSON 格式，可选，不填则使用 secrets.PROVIDERS)'
-        required: false
-        type: string
-        default: ''
       debug:
         description: '调试模式 (启用后会保存截图和 HTML 日志)'
         required: false
         type: boolean
+        default: false
 
 jobs:
   checkin:
@@ -28,6 +19,19 @@ jobs:
     environment: production
     env:
       PYTHONIOENCODING: utf-8
+      # ===== 在此处配置你的账号信息 =====
+      ANYROUTER_SESSION: ''
+      ANYROUTER_API_USER: ''
+      ANYROUTER_NAME: '账号1'
+      ANYROUTER_PROVIDER: 'anyrouter'
+      # Linux.do 账号（可选）
+      LINUXDO_USERNAME: ''
+      LINUXDO_PASSWORD: ''
+      # GitHub 账号（可选）
+      # GITHUB_USERNAME: ''
+      # GITHUB_PASSWORD: ''
+      # 代理地址（可选）
+      PROXY: ''
     steps:
     - name: set beijing timezone
       uses: szenius/set-timezone@v2.0
@@ -103,21 +107,7 @@ jobs:
         restore-keys: |
           balance-hash-
 
-    - name: 组装配置（支持非 JSON Secret）
-      env:
-        ACCOUNTS_RAW: ${{ inputs.accounts || secrets.ACCOUNTS }}
-        ACCOUNTS_LINUX_DO_RAW: ${{ secrets.ACCOUNTS_LINUX_DO }}
-        ACCOUNTS_GITHUB_RAW: ${{ secrets.ACCOUNTS_GITHUB }}
-        PROVIDERS_RAW: ${{ inputs.providers || secrets.PROVIDERS }}
-        PROXY_RAW: ${{ secrets.PROXY }}
-        ANYROUTER_SESSION_1: ${{ secrets.ANYROUTER_SESSION_1 }}
-        ANYROUTER_API_USER_1: ${{ secrets.ANYROUTER_API_USER_1 }}
-        ANYROUTER_NAME_1: ${{ secrets.ANYROUTER_NAME_1 }}
-        ANYROUTER_PROVIDER_1: ${{ secrets.ANYROUTER_PROVIDER_1 }}
-        CHECKIN_LINUX_DO_USERNAME: ${{ secrets.CHECKIN_LINUX_DO_USERNAME }}
-        CHECKIN_LINUX_DO_PASSWORD: ${{ secrets.CHECKIN_LINUX_DO_PASSWORD }}
-        CHECKIN_GITHUB_USERNAME: ${{ secrets.CHECKIN_GITHUB_USERNAME }}
-        CHECKIN_GITHUB_PASSWORD: ${{ secrets.CHECKIN_GITHUB_PASSWORD }}
+    - name: 组装配置
       run: |
         function Export-EnvVar {
           param(
@@ -132,103 +122,66 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "EOF"
         }
 
-        function Normalize-JsonArrayOrEmpty {
-          param(
-            [Parameter(Mandatory = $true)][string]$Name,
-            [AllowNull()][AllowEmptyString()][string]$Value,
-            [bool]$AllowEmptyArray = $true
-          )
-          if ([string]::IsNullOrWhiteSpace($Value)) {
-            return ""
-          }
-          try {
-            $parsed = $Value | ConvertFrom-Json -Depth 100
-            if (-not ($parsed -is [System.Array])) {
-              Write-Host "⚠️ $Name 不是 JSON 数组，已忽略该值"
-              return ""
-            }
-            if (-not $AllowEmptyArray -and $parsed.Count -eq 0) {
-              Write-Host "ℹ️ $Name 是空数组，视为未配置"
-              return ""
-            }
-            return (ConvertTo-Json -InputObject $parsed -Compress -Depth 100)
-          } catch {
-            Write-Host "⚠️ $Name 不是合法 JSON，已忽略该值: $($_.Exception.Message)"
-            return ""
-          }
-        }
+        # ===== 从顶级环境变量读取配置 =====
+        $hasSession = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_SESSION)
+        $hasApiUser = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_API_USER)
 
-        $accounts = Normalize-JsonArrayOrEmpty -Name "ACCOUNTS_RAW" -Value $env:ACCOUNTS_RAW -AllowEmptyArray $false
-        if ([string]::IsNullOrWhiteSpace($accounts)) {
-          $hasSession = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_SESSION_1)
-          $hasApiUser = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_API_USER_1)
-
-          if ($hasSession -and $hasApiUser) {
-            $accountName = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_NAME_1)) { "账号1" } else { $env:ANYROUTER_NAME_1 }
-            $provider = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_PROVIDER_1)) { "anyrouter" } else { $env:ANYROUTER_PROVIDER_1 }
-            $accounts = ConvertTo-Json -InputObject @(
-              @{
-                name = $accountName
-                provider = $provider
-                cookies = @{
-                  session = $env:ANYROUTER_SESSION_1
-                }
-                api_user = $env:ANYROUTER_API_USER_1
+        if ($hasSession -and $hasApiUser) {
+          $accountName = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_NAME)) { "账号1" } else { $env:ANYROUTER_NAME }
+          $provider = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_PROVIDER)) { "anyrouter" } else { $env:ANYROUTER_PROVIDER }
+          $accounts = ConvertTo-Json -InputObject @(
+            @{
+              name = $accountName
+              provider = $provider
+              cookies = @{
+                session = $env:ANYROUTER_SESSION
               }
-            ) -Compress -Depth 20
-            Write-Host "✅ 已通过 ANYROUTER_SESSION_1 + ANYROUTER_API_USER_1 自动生成 ACCOUNTS"
-          } elseif ($hasSession -or $hasApiUser) {
-            Write-Host "::error::ANYROUTER_SESSION_1 与 ANYROUTER_API_USER_1 必须同时配置"
-            exit 1
-          }
-        }
-
-        if ([string]::IsNullOrWhiteSpace($accounts)) {
-          Write-Host "::error::未提供 ACCOUNTS，且未提供可自动组装的 ANYROUTER_SESSION_1/ANYROUTER_API_USER_1"
+              api_user = $env:ANYROUTER_API_USER
+            }
+          ) -Compress -Depth 20
+          Write-Host "✅ 已通过 ANYROUTER 配置生成 ACCOUNTS"
+          Write-Host "DEBUG: Generated ACCOUNTS = $accounts"
+          Export-EnvVar -Name "ACCOUNTS" -Value $accounts
+        } elseif ($hasSession -or $hasApiUser) {
+          Write-Host "::error::ANYROUTER_SESSION 与 ANYROUTER_API_USER 必须同时配置"
+          exit 1
+        } else {
+          Write-Host "::error::请在 workflow 文件中配置 ANYROUTER_SESSION 和 ANYROUTER_API_USER"
           exit 1
         }
-        Export-EnvVar -Name "ACCOUNTS" -Value $accounts
 
-        $linuxDoAccounts = Normalize-JsonArrayOrEmpty -Name "ACCOUNTS_LINUX_DO_RAW" -Value $env:ACCOUNTS_LINUX_DO_RAW
-        if ([string]::IsNullOrWhiteSpace($linuxDoAccounts)) {
-          $hasLinuxUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_USERNAME)
-          $hasLinuxPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_PASSWORD)
-          if ($hasLinuxUser -and $hasLinuxPass) {
-            $linuxDoAccounts = ConvertTo-Json -InputObject @(
-              @{
-                username = $env:CHECKIN_LINUX_DO_USERNAME
-                password = $env:CHECKIN_LINUX_DO_PASSWORD
-              }
-            ) -Compress -Depth 10
-            Write-Host "✅ 已通过 CHECKIN_LINUX_DO_USERNAME/PASSWORD 自动生成 ACCOUNTS_LINUX_DO"
-          } elseif ($hasLinuxUser -or $hasLinuxPass) {
-            Write-Host "::error::CHECKIN_LINUX_DO_USERNAME 与 CHECKIN_LINUX_DO_PASSWORD 必须同时配置"
-            exit 1
-          }
+        # Linux.do 账号
+        $linuxDoAccounts = ""
+        $hasLinuxUser = -not [string]::IsNullOrWhiteSpace($env:LINUXDO_USERNAME)
+        $hasLinuxPass = -not [string]::IsNullOrWhiteSpace($env:LINUXDO_PASSWORD)
+        if ($hasLinuxUser -and $hasLinuxPass) {
+          $linuxDoAccounts = ConvertTo-Json -InputObject @(
+            @{
+              username = $env:LINUXDO_USERNAME
+              password = $env:LINUXDO_PASSWORD
+            }
+          ) -Compress -Depth 10
+          Write-Host "✅ 已生成 ACCOUNTS_LINUX_DO"
         }
         Export-EnvVar -Name "ACCOUNTS_LINUX_DO" -Value $linuxDoAccounts
 
-        $githubAccounts = Normalize-JsonArrayOrEmpty -Name "ACCOUNTS_GITHUB_RAW" -Value $env:ACCOUNTS_GITHUB_RAW
-        if ([string]::IsNullOrWhiteSpace($githubAccounts)) {
-          $hasGithubUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_USERNAME)
-          $hasGithubPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_PASSWORD)
-          if ($hasGithubUser -and $hasGithubPass) {
-            $githubAccounts = ConvertTo-Json -InputObject @(
-              @{
-                username = $env:CHECKIN_GITHUB_USERNAME
-                password = $env:CHECKIN_GITHUB_PASSWORD
-              }
-            ) -Compress -Depth 10
-            Write-Host "✅ 已通过 CHECKIN_GITHUB_USERNAME/PASSWORD 自动生成 ACCOUNTS_GITHUB"
-          } elseif ($hasGithubUser -or $hasGithubPass) {
-            Write-Host "::error::CHECKIN_GITHUB_USERNAME 与 CHECKIN_GITHUB_PASSWORD 必须同时配置"
-            exit 1
-          }
+        # GitHub 账号
+        $githubAccounts = ""
+        $hasGithubUser = -not [string]::IsNullOrWhiteSpace($env:GITHUB_USERNAME)
+        $hasGithubPass = -not [string]::IsNullOrWhiteSpace($env:GITHUB_PASSWORD)
+        if ($hasGithubUser -and $hasGithubPass) {
+          $githubAccounts = ConvertTo-Json -InputObject @(
+            @{
+              username = $env:GITHUB_USERNAME
+              password = $env:GITHUB_PASSWORD
+            }
+          ) -Compress -Depth 10
+          Write-Host "✅ 已生成 ACCOUNTS_GITHUB"
         }
         Export-EnvVar -Name "ACCOUNTS_GITHUB" -Value $githubAccounts
 
-        Export-EnvVar -Name "PROVIDERS" -Value $env:PROVIDERS_RAW
-        Export-EnvVar -Name "PROXY" -Value $env:PROXY_RAW
+        # 代理
+        Export-EnvVar -Name "PROXY" -Value $env:PROXY
 
     - name: 校验账号配置 JSON
       run: |
