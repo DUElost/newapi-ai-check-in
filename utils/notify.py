@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -38,6 +41,10 @@ class NotificationKit:
 	@property
 	def feishu_webhook(self):
 		return os.getenv('FEISHU_WEBHOOK')
+
+	@property
+	def feishu_secret(self):
+		return os.getenv('FEISHU_SECRET')
 
 	@property
 	def weixin_webhook(self):
@@ -92,6 +99,21 @@ class NotificationKit:
 		if not self.feishu_webhook:
 			raise ValueError('Feishu Webhook not configured')
 
+		# 飞书签名校验（可选）
+		timestamp = None
+		sign = None
+		if self.feishu_secret:
+			import time
+			timestamp = str(int(time.time()))
+			sign_str = f'{timestamp}\n{self.feishu_secret}'
+			sign = base64.b64encode(hmac.new(sign_str.encode('utf-8'), digestmod=hashlib.sha256).digest()).decode('utf-8')
+
+		# 构建请求 URL
+		url = self.feishu_webhook
+		if timestamp and sign:
+			separator = '&' if '?' in url else '?'
+			url = f'{url}{separator}timestamp={timestamp}&sign={sign}'
+
 		data = {
 			'msg_type': 'interactive',
 			'card': {
@@ -99,7 +121,7 @@ class NotificationKit:
 				'header': {'template': 'blue', 'title': {'content': title, 'tag': 'plain_text'}},
 			},
 		}
-		curl_requests.post(self.feishu_webhook, json=data, timeout=30)
+		curl_requests.post(url, json=data, timeout=30)
 
 	def send_wecom(self, title: str, content: str):
 		if not self.weixin_webhook:
