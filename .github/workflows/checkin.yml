@@ -103,13 +103,108 @@ jobs:
         restore-keys: |
           balance-hash-
 
-    - name: 校验账号配置 JSON
+    - name: 组装配置（支持非 JSON Secret）
       env:
-        ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
-        ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
-        ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
-        PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
-        PROXY: ${{ secrets.PROXY }}
+        ACCOUNTS_RAW: ${{ inputs.accounts || secrets.ACCOUNTS }}
+        ACCOUNTS_LINUX_DO_RAW: ${{ secrets.ACCOUNTS_LINUX_DO }}
+        ACCOUNTS_GITHUB_RAW: ${{ secrets.ACCOUNTS_GITHUB }}
+        PROVIDERS_RAW: ${{ inputs.providers || secrets.PROVIDERS }}
+        PROXY_RAW: ${{ secrets.PROXY }}
+        ANYROUTER_SESSION_1: ${{ secrets.ANYROUTER_SESSION_1 }}
+        ANYROUTER_API_USER_1: ${{ secrets.ANYROUTER_API_USER_1 }}
+        ANYROUTER_NAME_1: ${{ secrets.ANYROUTER_NAME_1 }}
+        ANYROUTER_PROVIDER_1: ${{ secrets.ANYROUTER_PROVIDER_1 }}
+        CHECKIN_LINUX_DO_USERNAME: ${{ secrets.CHECKIN_LINUX_DO_USERNAME }}
+        CHECKIN_LINUX_DO_PASSWORD: ${{ secrets.CHECKIN_LINUX_DO_PASSWORD }}
+        CHECKIN_GITHUB_USERNAME: ${{ secrets.CHECKIN_GITHUB_USERNAME }}
+        CHECKIN_GITHUB_PASSWORD: ${{ secrets.CHECKIN_GITHUB_PASSWORD }}
+      run: |
+        function Export-EnvVar {
+          param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Value
+          )
+          if ([string]::IsNullOrWhiteSpace($Value)) {
+            return
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "$Name<<EOF"
+          Add-Content -Path $env:GITHUB_ENV -Value $Value
+          Add-Content -Path $env:GITHUB_ENV -Value "EOF"
+        }
+
+        $accounts = $env:ACCOUNTS_RAW
+        if ([string]::IsNullOrWhiteSpace($accounts)) {
+          $hasSession = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_SESSION_1)
+          $hasApiUser = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_API_USER_1)
+
+          if ($hasSession -and $hasApiUser) {
+            $accountName = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_NAME_1)) { "账号1" } else { $env:ANYROUTER_NAME_1 }
+            $provider = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_PROVIDER_1)) { "anyrouter" } else { $env:ANYROUTER_PROVIDER_1 }
+            $accounts = @(
+              @{
+                name = $accountName
+                provider = $provider
+                cookies = @{
+                  session = $env:ANYROUTER_SESSION_1
+                }
+                api_user = $env:ANYROUTER_API_USER_1
+              }
+            ) | ConvertTo-Json -Compress -Depth 20
+            Write-Host "✅ 已通过 ANYROUTER_SESSION_1 + ANYROUTER_API_USER_1 自动生成 ACCOUNTS"
+          } elseif ($hasSession -or $hasApiUser) {
+            Write-Host "::error::ANYROUTER_SESSION_1 与 ANYROUTER_API_USER_1 必须同时配置"
+            exit 1
+          }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($accounts)) {
+          Write-Host "::error::未提供 ACCOUNTS，且未提供可自动组装的 ANYROUTER_SESSION_1/ANYROUTER_API_USER_1"
+          exit 1
+        }
+        Export-EnvVar -Name "ACCOUNTS" -Value $accounts
+
+        $linuxDoAccounts = $env:ACCOUNTS_LINUX_DO_RAW
+        if ([string]::IsNullOrWhiteSpace($linuxDoAccounts)) {
+          $hasLinuxUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_USERNAME)
+          $hasLinuxPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_PASSWORD)
+          if ($hasLinuxUser -and $hasLinuxPass) {
+            $linuxDoAccounts = @(
+              @{
+                username = $env:CHECKIN_LINUX_DO_USERNAME
+                password = $env:CHECKIN_LINUX_DO_PASSWORD
+              }
+            ) | ConvertTo-Json -Compress -Depth 10
+            Write-Host "✅ 已通过 CHECKIN_LINUX_DO_USERNAME/PASSWORD 自动生成 ACCOUNTS_LINUX_DO"
+          } elseif ($hasLinuxUser -or $hasLinuxPass) {
+            Write-Host "::error::CHECKIN_LINUX_DO_USERNAME 与 CHECKIN_LINUX_DO_PASSWORD 必须同时配置"
+            exit 1
+          }
+        }
+        Export-EnvVar -Name "ACCOUNTS_LINUX_DO" -Value $linuxDoAccounts
+
+        $githubAccounts = $env:ACCOUNTS_GITHUB_RAW
+        if ([string]::IsNullOrWhiteSpace($githubAccounts)) {
+          $hasGithubUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_USERNAME)
+          $hasGithubPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_PASSWORD)
+          if ($hasGithubUser -and $hasGithubPass) {
+            $githubAccounts = @(
+              @{
+                username = $env:CHECKIN_GITHUB_USERNAME
+                password = $env:CHECKIN_GITHUB_PASSWORD
+              }
+            ) | ConvertTo-Json -Compress -Depth 10
+            Write-Host "✅ 已通过 CHECKIN_GITHUB_USERNAME/PASSWORD 自动生成 ACCOUNTS_GITHUB"
+          } elseif ($hasGithubUser -or $hasGithubPass) {
+            Write-Host "::error::CHECKIN_GITHUB_USERNAME 与 CHECKIN_GITHUB_PASSWORD 必须同时配置"
+            exit 1
+          }
+        }
+        Export-EnvVar -Name "ACCOUNTS_GITHUB" -Value $githubAccounts
+
+        Export-EnvVar -Name "PROVIDERS" -Value $env:PROVIDERS_RAW
+        Export-EnvVar -Name "PROXY" -Value $env:PROXY_RAW
+
+    - name: 校验账号配置 JSON
       run: |
         function Test-JsonType {
           param(
@@ -228,12 +323,6 @@ jobs:
         }
 
     - name: 账号配置预览（脱敏）
-      env:
-        ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
-        ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
-        ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
-        PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
-        PROXY: ${{ secrets.PROXY }}
       run: |
         function Parse-JsonOrNull {
           param(
@@ -323,11 +412,6 @@ jobs:
              
     - name: 执行签到
       env:
-        ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
-        ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
-        ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
-        PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
-        PROXY: ${{secrets.PROXY}}
         DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
