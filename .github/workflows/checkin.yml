@@ -232,6 +232,19 @@ jobs:
 
     - name: 校验账号配置 JSON
       run: |
+        function Export-EnvVar {
+          param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [AllowNull()][AllowEmptyString()][string]$Value
+          )
+          if ([string]::IsNullOrWhiteSpace($Value)) {
+            return
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "$Name<<EOF"
+          Add-Content -Path $env:GITHUB_ENV -Value $Value
+          Add-Content -Path $env:GITHUB_ENV -Value "EOF"
+        }
+
         function Test-JsonType {
           param(
             [Parameter(Mandatory = $true)]
@@ -259,8 +272,16 @@ jobs:
           }
 
           if ($ExpectedType -eq "array" -and -not ($parsed -is [System.Array])) {
-            Write-Host "::error::$Name 必须是 JSON 数组格式 []"
-            exit 1
+            $canAutoWrap = $Name -in @("ACCOUNTS", "ACCOUNTS_LINUX_DO", "ACCOUNTS_GITHUB")
+            if ($canAutoWrap -and $parsed -is [System.Management.Automation.PSCustomObject]) {
+              $normalized = ConvertTo-Json -InputObject @($parsed) -Compress -Depth 100
+              Export-EnvVar -Name $Name -Value $normalized
+              $parsed = @($parsed)
+              Write-Host "⚠️ $Name 当前为对象格式，已自动转为单元素数组"
+            } else {
+              Write-Host "::error::$Name 必须是 JSON 数组格式 []"
+              exit 1
+            }
           }
           if ($ExpectedType -eq "object" -and ($parsed -is [System.Array] -or $null -eq $parsed)) {
             Write-Host "::error::$Name 必须是 JSON 对象格式 {}"
