@@ -3,12 +3,6 @@ on:
   schedule:
     - cron: '0 */8 * * *'
   workflow_dispatch:
-    inputs:
-      debug:
-        description: '调试模式 (启用后会保存截图和 HTML 日志)'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   checkin:
@@ -129,18 +123,17 @@ jobs:
         if ($hasSession -and $hasApiUser) {
           $accountName = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_NAME)) { "账号1" } else { $env:ANYROUTER_NAME }
           $provider = if ([string]::IsNullOrWhiteSpace($env:ANYROUTER_PROVIDER)) { "anyrouter" } else { $env:ANYROUTER_PROVIDER }
-          $accounts = ConvertTo-Json -InputObject @(
-            @{
-              name = $accountName
-              provider = $provider
-              cookies = @{
-                session = $env:ANYROUTER_SESSION
-              }
-              api_user = $env:ANYROUTER_API_USER
+          $accountObj = @{
+            name = $accountName
+            provider = $provider
+            cookies = @{
+              session = $env:ANYROUTER_SESSION
             }
-          ) -Compress -Depth 20
+            api_user = $env:ANYROUTER_API_USER
+          }
+          $accountJson = ConvertTo-Json -InputObject $accountObj -Compress -Depth 20
+          $accounts = "[$accountJson]"
           Write-Host "✅ 已通过 ANYROUTER 配置生成 ACCOUNTS"
-          Write-Host "DEBUG: Generated ACCOUNTS = $accounts"
           Export-EnvVar -Name "ACCOUNTS" -Value $accounts
         } elseif ($hasSession -or $hasApiUser) {
           Write-Host "::error::ANYROUTER_SESSION 与 ANYROUTER_API_USER 必须同时配置"
@@ -155,12 +148,9 @@ jobs:
         $hasLinuxUser = -not [string]::IsNullOrWhiteSpace($env:LINUXDO_USERNAME)
         $hasLinuxPass = -not [string]::IsNullOrWhiteSpace($env:LINUXDO_PASSWORD)
         if ($hasLinuxUser -and $hasLinuxPass) {
-          $linuxDoAccounts = ConvertTo-Json -InputObject @(
-            @{
-              username = $env:LINUXDO_USERNAME
-              password = $env:LINUXDO_PASSWORD
-            }
-          ) -Compress -Depth 10
+          $linuxObj = @{ username = $env:LINUXDO_USERNAME; password = $env:LINUXDO_PASSWORD }
+          $linuxJson = ConvertTo-Json -InputObject $linuxObj -Compress -Depth 10
+          $linuxDoAccounts = "[$linuxJson]"
           Write-Host "✅ 已生成 ACCOUNTS_LINUX_DO"
         }
         Export-EnvVar -Name "ACCOUNTS_LINUX_DO" -Value $linuxDoAccounts
@@ -170,12 +160,9 @@ jobs:
         $hasGithubUser = -not [string]::IsNullOrWhiteSpace($env:GITHUB_USERNAME)
         $hasGithubPass = -not [string]::IsNullOrWhiteSpace($env:GITHUB_PASSWORD)
         if ($hasGithubUser -and $hasGithubPass) {
-          $githubAccounts = ConvertTo-Json -InputObject @(
-            @{
-              username = $env:GITHUB_USERNAME
-              password = $env:GITHUB_PASSWORD
-            }
-          ) -Compress -Depth 10
+          $githubObj = @{ username = $env:GITHUB_USERNAME; password = $env:GITHUB_PASSWORD }
+          $githubJson = ConvertTo-Json -InputObject $githubObj -Compress -Depth 10
+          $githubAccounts = "[$githubJson]"
           Write-Host "✅ 已生成 ACCOUNTS_GITHUB"
         }
         Export-EnvVar -Name "ACCOUNTS_GITHUB" -Value $githubAccounts
