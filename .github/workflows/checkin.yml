@@ -132,7 +132,33 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "EOF"
         }
 
-        $accounts = $env:ACCOUNTS_RAW
+        function Normalize-JsonArrayOrEmpty {
+          param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [AllowNull()][AllowEmptyString()][string]$Value,
+            [bool]$AllowEmptyArray = $true
+          )
+          if ([string]::IsNullOrWhiteSpace($Value)) {
+            return ""
+          }
+          try {
+            $parsed = $Value | ConvertFrom-Json -Depth 100
+            if (-not ($parsed -is [System.Array])) {
+              Write-Host "⚠️ $Name 不是 JSON 数组，已忽略该值"
+              return ""
+            }
+            if (-not $AllowEmptyArray -and $parsed.Count -eq 0) {
+              Write-Host "ℹ️ $Name 是空数组，视为未配置"
+              return ""
+            }
+            return ($parsed | ConvertTo-Json -Compress -Depth 100)
+          } catch {
+            Write-Host "⚠️ $Name 不是合法 JSON，已忽略该值: $($_.Exception.Message)"
+            return ""
+          }
+        }
+
+        $accounts = Normalize-JsonArrayOrEmpty -Name "ACCOUNTS_RAW" -Value $env:ACCOUNTS_RAW -AllowEmptyArray $false
         if ([string]::IsNullOrWhiteSpace($accounts)) {
           $hasSession = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_SESSION_1)
           $hasApiUser = -not [string]::IsNullOrWhiteSpace($env:ANYROUTER_API_USER_1)
@@ -163,7 +189,7 @@ jobs:
         }
         Export-EnvVar -Name "ACCOUNTS" -Value $accounts
 
-        $linuxDoAccounts = $env:ACCOUNTS_LINUX_DO_RAW
+        $linuxDoAccounts = Normalize-JsonArrayOrEmpty -Name "ACCOUNTS_LINUX_DO_RAW" -Value $env:ACCOUNTS_LINUX_DO_RAW
         if ([string]::IsNullOrWhiteSpace($linuxDoAccounts)) {
           $hasLinuxUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_USERNAME)
           $hasLinuxPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_LINUX_DO_PASSWORD)
@@ -182,7 +208,7 @@ jobs:
         }
         Export-EnvVar -Name "ACCOUNTS_LINUX_DO" -Value $linuxDoAccounts
 
-        $githubAccounts = $env:ACCOUNTS_GITHUB_RAW
+        $githubAccounts = Normalize-JsonArrayOrEmpty -Name "ACCOUNTS_GITHUB_RAW" -Value $env:ACCOUNTS_GITHUB_RAW
         if ([string]::IsNullOrWhiteSpace($githubAccounts)) {
           $hasGithubUser = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_USERNAME)
           $hasGithubPass = -not [string]::IsNullOrWhiteSpace($env:CHECKIN_GITHUB_PASSWORD)
