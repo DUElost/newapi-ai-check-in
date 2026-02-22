@@ -121,7 +121,9 @@ class NotificationKit:
 				'header': {'template': 'blue', 'title': {'content': title, 'tag': 'plain_text'}},
 			},
 		}
-		curl_requests.post(url, json=data, timeout=30)
+		response = curl_requests.post(url, json=data, timeout=30)
+		if response.status_code != 200:
+			raise Exception(f'HTTP {response.status_code}: {response.text}')
 
 	def send_wecom(self, title: str, content: str):
 		if not self.weixin_webhook:
